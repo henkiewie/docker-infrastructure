@@ -1,0 +1,27 @@
+# Runtime data and secrets must never enter Git.
+config/
+data/
+backups/
+container-backups/
+*.db
+*.sqlite
+*.conf
+*.key
+*.pem
+*.pfx
+*.p12
+*.tar
+*.tar.gz
+*.zip
+*.sha256
+.env
+.env.*
+local-secrets/
+
+# Generated files.
+__pycache__/
+*.py[cod]
+*.log
+*.log.*
+.DS_Store
+Thumbs.db

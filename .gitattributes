@@ -1,0 +1,10 @@
+# Preserve Linux-compatible files when the repository is used from Windows.
+*.sh text eol=lf
+*.py text eol=lf
+*.service text eol=lf
+*.timer text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# PowerShell is used from Windows.
+*.ps1 text eol=crlf
