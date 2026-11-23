@@ -9,9 +9,9 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import pwd
 import shutil
 import sqlite3
+import subprocess
 import tarfile
 
 
@@ -26,18 +26,12 @@ DEFAULT_DESTINATION = Path("/home/henk/container-backups")
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--destination", type=Path, default=DEFAULT_DESTINATION)
-    parser.add_argument("--owner", default="henk", help="Owner of completed archives")
     parser.add_argument(
         "--check",
         action="store_true",
         help="Validate source availability and SQLite integrity without writing a backup",
     )
     return parser.parse_args()
-
-
-def require_root() -> None:
-    if os.geteuid() != 0:
-        raise SystemExit("This backup must run as root to read the WireGuard configuration.")
 
 
 def sqlite_quick_check(path: Path) -> None:
@@ -65,32 +59,66 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def docker_can_read_wg_config() -> bool:
+    docker = shutil.which("docker")
+    if not docker:
+        return False
+    result = subprocess.run(
+        [docker, "exec", "wg-easy", "test", "-r", "/etc/wireguard/wg0.conf"],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return result.returncode == 0
+
+
+def copy_wg_config(destination: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if os.access(WG_CONFIG, os.R_OK):
+        shutil.copy2(WG_CONFIG, destination)
+    else:
+        docker = shutil.which("docker")
+        if not docker:
+            raise RuntimeError("Docker is required to read the WireGuard configuration.")
+        with destination.open("wb") as handle:
+            result = subprocess.run(
+                [docker, "exec", "wg-easy", "cat", "/etc/wireguard/wg0.conf"],
+                check=False,
+                stdout=handle,
+                stderr=subprocess.PIPE,
+            )
+        if result.returncode != 0:
+            destination.unlink(missing_ok=True)
+            message = result.stderr.decode("utf-8", errors="replace").strip()
+            raise RuntimeError(f"Could not read wg0.conf through wg-easy: {message}")
+    os.chmod(destination, 0o600)
+
+
 def validate_sources() -> None:
     required = (
         WG_DATABASE,
-        WG_CONFIG,
         WG_COMPOSE,
         GOTIFY_DATABASE,
         STREAM_MONITOR_COMPOSE,
     )
     missing = [str(path) for path in required if not path.is_file()]
+    if not WG_CONFIG.is_file():
+        missing.append(str(WG_CONFIG))
     if missing:
         raise FileNotFoundError("Missing required source files: " + ", ".join(missing))
+    if not os.access(WG_CONFIG, os.R_OK) and not docker_can_read_wg_config():
+        raise PermissionError(
+            "wg0.conf is not directly readable and could not be read through wg-easy."
+        )
     sqlite_quick_check(WG_DATABASE)
     sqlite_quick_check(GOTIFY_DATABASE)
 
 
-def set_owner(path: Path, owner: str) -> None:
-    account = pwd.getpwnam(owner)
-    os.chown(path, account.pw_uid, account.pw_gid)
-
-
-def create_backup(destination: Path, owner: str) -> tuple[Path, Path]:
+def create_backup(destination: Path) -> tuple[Path, Path]:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     backup_name = f"container-state-{timestamp}-utc"
     destination.mkdir(parents=True, exist_ok=True)
     os.chmod(destination, 0o700)
-    set_owner(destination, owner)
 
     staging = destination / f".{backup_name}.staging"
     archive = destination / f"{backup_name}.tar.gz"
@@ -104,7 +132,7 @@ def create_backup(destination: Path, owner: str) -> tuple[Path, Path]:
         (staging / "compose").mkdir(parents=True)
 
         backup_sqlite(WG_DATABASE, staging / "wg-easy" / "wg-easy.db")
-        shutil.copy2(WG_CONFIG, staging / "wg-easy" / "wg0.conf")
+        copy_wg_config(staging / "wg-easy" / "wg0.conf")
         backup_sqlite(GOTIFY_DATABASE, staging / "gotify" / "gotify.db")
         shutil.copy2(WG_COMPOSE, staging / "compose" / "wg-easy-docker-compose.yml")
         shutil.copy2(
@@ -139,8 +167,6 @@ def create_backup(destination: Path, owner: str) -> tuple[Path, Path]:
         checksum_file.write_text(f"{archive_hash}  {archive.name}\n", encoding="ascii")
         os.chmod(archive, 0o600)
         os.chmod(checksum_file, 0o600)
-        set_owner(archive, owner)
-        set_owner(checksum_file, owner)
         return archive, checksum_file
     finally:
         if staging.exists():
@@ -149,14 +175,12 @@ def create_backup(destination: Path, owner: str) -> tuple[Path, Path]:
 
 def main() -> int:
     args = parse_args()
-    if not args.check:
-        require_root()
     validate_sources()
     if args.check:
         print("Source files and SQLite integrity checks passed.")
         return 0
 
-    archive, checksum_file = create_backup(args.destination, args.owner)
+    archive, checksum_file = create_backup(args.destination)
     print(f"Backup created: {archive}")
     print(f"Checksum created: {checksum_file}")
     return 0

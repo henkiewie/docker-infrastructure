@@ -16,40 +16,40 @@ Container images are not archived. They are replaceable from their registries; t
 
 The generated archives contain WireGuard private keys, VPN peer configuration and Gotify application data. They must never be committed to GitHub, attached to ordinary messages or stored in an untrusted cloud folder. Archive and checksum files are excluded by `.gitignore`.
 
-## Installation without activation
+## Installation without scheduling
 
 Copy or clone this repository on the Docker host and run:
 
 ```sh
-sudo ./scripts/install-container-state-backup.sh
+./scripts/install-container-state-backup.sh
 ```
 
-The installer backs up any previously installed script/unit files, installs the new files and reloads systemd. It deliberately does not enable the timer.
+The normal `henk` account can back up both databases. Because the host copy of `wg0.conf` is root-only, the script reads it through the already-running wg-easy container. No sudo password is stored or requested.
+
+The installer backs up any previously installed script and the current user crontab, then installs the backup program under `~/.local/bin`. It deliberately does not add or change a schedule.
 
 Validate the live sources and databases without writing a backup:
 
 ```sh
-sudo /usr/local/sbin/backup-container-state.py --check
+~/.local/bin/backup-container-state.py --check
 ```
 
 Create and verify one manual backup:
 
 ```sh
-sudo systemctl start container-state-backup.service
-sudo systemctl status container-state-backup.service --no-pager
-sudo journalctl -u container-state-backup.service -n 50 --no-pager
+~/.local/bin/backup-container-state.py
 ls -l /home/henk/container-backups
 sha256sum -c /home/henk/container-backups/container-state-*-utc.tar.gz.sha256
 ```
 
-After the manual result has been inspected, enable the daily timer:
+After the manual result and off-host copy have been inspected, enable the daily schedule:
 
 ```sh
-sudo systemctl enable --now container-state-backup.timer
-systemctl list-timers container-state-backup.timer --no-pager
+./scripts/install-container-state-backup.sh --enable
+crontab -l
 ```
 
-The timer runs daily at 02:30 UTC with a random delay of up to ten minutes. Backups are small, and automatic deletion is intentionally not included.
+The user cron schedule runs daily at 02:17 in the Docker host's local timezone. It does not depend on an interactive login. Backups are small, and automatic deletion is intentionally not included.
 
 ## Copy the latest backup off the Docker host
 

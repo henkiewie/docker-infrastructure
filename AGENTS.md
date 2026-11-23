@@ -20,8 +20,8 @@ This repository stores rebuild instructions, sanitized Compose definitions, back
 1. Make source changes in this repository and review the Git diff.
 2. Validate Python, PowerShell, shell and Compose syntax.
 3. Back up exact live targets before replacing installed scripts or units.
-4. Install without enabling timers first, unless activation was explicitly requested.
+4. Install without changing the user crontab first, unless activation was explicitly requested.
 5. Run and verify one manual backup before enabling a schedule.
 6. Verify archive checksums and perform a documented restore test when practical.
 
-Always distinguish repository preparation, installation, timer activation, backup creation and off-host copying in the final report.
+Always distinguish repository preparation, installation, cron activation, backup creation and off-host copying in the final report.
